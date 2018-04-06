@@ -3,8 +3,9 @@ module Data.Record.Catamorphism where
 import Prelude
 
 import Data.Array (cons)
-import Data.Maybe (Maybe(..))
 import Data.Record (get, insert)
+import Data.Record.Builder (Builder, build)
+import Data.Record.Builder as B
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Tuple (Tuple(..))
 import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind RowList)
@@ -37,10 +38,7 @@ instance cataRowNil
 data LenAlgebra = LenAlgebra
 
 instance lenAlgebra :: Algebra LenAlgebra lbl a (Int -> Int) where
-  algebra _ _ _ z = z + 1
-
--- instance algebraLen :: Algebra "length" lbl a (Int -> Int) where
---   algebra _ _ _ z = z + 1
+  algebra _ _ _ c = c + 1
 
 recordLen
   :: forall row list
@@ -66,33 +64,30 @@ recordShow
   => Record row -> Res
 recordShow rec = cata ShowAlgebra (RLProxy :: RLProxy list) rec $ []
 
--- {- This algebra allows us to insert each value into functorial container -}
 data MapAlgebra (f :: Type -> Type) = MapAlgebra (forall a. a -> f a)
 
 instance algebraMap ::
   ( IsSymbol lbl
   , RowCons lbl (f a) tail row
   , RowLacks lbl tail
-  ) => Algebra (MapAlgebra f) lbl a ((Record tail) -> (Record row)) where
-  algebra (MapAlgebra f) lbl val acc = insert lbl (f val) acc
+  ) => Algebra (MapAlgebra f) lbl a (Builder (Record tail) (Record row)) where
+  algebra (MapAlgebra f) lbl val = B.insert lbl (f val)
 
 recordMap
   :: forall f row list res
    . RowToList row list
-  => Cata (MapAlgebra f) list row ({} -> res)
-  => (forall a. a -> f a) -> Record row -> res
+  => Cata (MapAlgebra f) list row (Builder {} (Record res))
+  => (forall a. a -> f a) -> Record row -> Record res
 recordMap f r =
   let
     list = RLProxy :: RLProxy list
-    res = cata (MapAlgebra f) list r $ {}
+    builder :: Builder {} (Record res)
+    builder = cata (MapAlgebra f) list r
+    res :: Record res
+    res = build builder {}
   in res
 
--- recordMapJust
---   :: forall row list res
---    . RowToList row list
---   => Cata "map" list row (Tuple (Maybe Unit) {} -> Tuple (Maybe Unit) res)
---   => Record row -> res
--- recordMapJust = recordMap (Just 1)
+-- TODO Change to record builders
 
 data ApplyAlgebra a = ApplyAlgebra a
 
@@ -114,24 +109,25 @@ recordApplyTo v r =
     res = cata (ApplyAlgebra v) list r {}
   in res
 
--- instance algebraCollect ::
---   ( IsSymbol lbl
---   , RowCons lbl a tail row
---   , RowLacks lbl tail
---   , Apply f
---   ) => Algebra "collect" lbl (f a) (f (Record tail) -> (f (Record row))) where
---   algebra _ lbl a acc = (insert lbl) <$> a <*> acc
+data CollectAlgebra = CollectAlgebra
 
--- recordCollect
---   :: forall f row list res
---    . RowToList row list
---   => Applicative f
---   => Cata "collect" list row (f {} -> f res)
---   => Record row -> f res
--- recordCollect r =
---   let
---     name = SProxy :: SProxy "collect"
---     list = RLProxy :: RLProxy list
---     acc = pure {}
---     res = cata name list r $ acc
---   in res
+instance algebraCollect ::
+  ( IsSymbol lbl
+  , RowCons lbl a tail row
+  , RowLacks lbl tail
+  , Apply f
+  ) => Algebra CollectAlgebra lbl (f a) (f (Record tail) -> (f (Record row))) where
+  algebra _ lbl a acc = (insert lbl) <$> a <*> acc
+
+recordCollect
+  :: forall f row list res
+   . RowToList row list
+  => Applicative f
+  => Cata CollectAlgebra list row (f {} -> f res)
+  => Record row -> f res
+recordCollect r =
+  let
+    list = RLProxy :: RLProxy list
+    acc = pure {}
+    res = cata CollectAlgebra list r $ acc
+  in res
