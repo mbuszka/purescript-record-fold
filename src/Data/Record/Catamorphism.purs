@@ -1,4 +1,4 @@
-module Catamorphism where
+module Data.Record.Catamorphism where
 
 import Prelude
 
@@ -9,20 +9,20 @@ import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Tuple (Tuple(..))
 import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind RowList)
 
-class Algebra (name :: Symbol) (lbl :: Symbol) input res | input name -> res where
-  algebra :: (SProxy name) -> (SProxy lbl) -> input -> res
+class Algebra (name :: Symbol) (lbl :: Symbol) val res | name val -> res where
+  algebra :: (SProxy name) -> (SProxy lbl) -> val -> res
 
 class Cata (name :: Symbol) (list :: RowList) (row :: # Type) res | name -> res where
   cata :: (SProxy name) -> (RLProxy list) -> Record row -> res
 
 instance cataRowCons
   ::
-  ( Algebra name lbl input (res a b)
+  ( Algebra name lbl val (fun a b)
   , IsSymbol lbl
-  , RowCons lbl input rest row
-  , Semigroupoid res
-  , Cata name tail row (res b c)
-  ) => Cata name (Cons lbl input tail) row (res a c) where
+  , RowCons lbl val rest row
+  , Semigroupoid fun
+  , Cata name tail row (fun b c)
+  ) => Cata name (Cons lbl val tail) row (fun a c) where
   cata name _ record =
     let
       key = SProxy :: SProxy lbl
@@ -31,7 +31,7 @@ instance cataRowCons
     in algebra name key (get key record) >>> res
 
 instance cataRowNil
-  :: (Category res) => Cata name Nil r (res a a) where
+  :: (Category fun) => Cata name Nil r (fun a a) where
   cata name _ _ = id
 
 instance algebraLen :: Algebra "length" lbl a (Int -> Int) where
