@@ -12,42 +12,36 @@ import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind R
 class Algebra (name :: Symbol) (lbl :: Symbol) input res' res | name -> res where
   algebra :: (SProxy name) -> (SProxy lbl) -> input -> res' -> res
 
-class Zero (name :: Symbol) res | name -> res where
-  algZero :: SProxy name -> res
-
-class Cata (name :: Symbol) (list :: RowList) (row :: # Type) res | name -> res where
-  cata :: (SProxy name) -> (RLProxy list) -> Record row -> res
+class Cata (name :: Symbol) (list :: RowList) (row :: # Type) z res | name -> res z where
+  cata :: (SProxy name) -> (RLProxy list) -> z -> Record row -> res
 
 instance cataRowCons
   ::
   ( Algebra name lbl input res' res
   , IsSymbol lbl
   , RowCons lbl input rest row
-  , Cata name tail row res'
-  ) => Cata name (Cons lbl input tail) row res where
-  cata name _ record =
+  , Cata name tail row z res'
+  ) => Cata name (Cons lbl input tail) row z res where
+  cata name _ z record =
     let
       key = SProxy :: SProxy lbl
       tail = RLProxy :: RLProxy tail
-      res = cata name tail record
+      res = cata name tail z record
     in algebra name key (get key record) res
 
 instance cataRowNil
-  :: Zero name res => Cata name Nil r res where
-  cata name _ _ = algZero name
+  :: Cata name Nil r z z where
+  cata name _ z _ = z
 
 instance algebraLen :: Algebra "length" lbl a Int Int where
   algebra _ _ _ c = c + 1
 
-instance zeroLen :: Zero "length" Int where
-  algZero _ = 0
-
 recordLen
   :: forall row list
    . RowToList row list
-  => Cata "length" list row Int
+  => Cata "length" list row Int Int
   => Record row -> Int
-recordLen rec = cata (SProxy :: SProxy "length") (RLProxy :: RLProxy list) rec
+recordLen rec = cata (SProxy :: SProxy "length") (RLProxy :: RLProxy list) 0 rec
 
 type Res = Array (Tuple String String)
 
@@ -57,29 +51,39 @@ instance algebraShow ::
   ) => Algebra "show" lbl a (Array (Tuple String String)) (Array (Tuple String String)) where
   algebra _ sym val acc = cons (Tuple (reflectSymbol sym) (show val)) acc
 
-instance zeroShow :: Zero "show" (Array (Tuple String String)) where
-  algZero _ = []
-
 recordShow
   :: forall row list
    . RowToList row list
-  => Cata "show" list row Res
+  => Cata "show" list row Res Res
   => Record row -> Res
-recordShow rec = cata (SProxy :: SProxy "show") (RLProxy :: RLProxy list) rec
+recordShow rec = cata (SProxy :: SProxy "show") (RLProxy :: RLProxy list) [] rec
 
-instance algebraMapJust ::
+{- This algebra allows us to insert each value into functorial container -}
+instance algebraMap ::
   ( IsSymbol lbl
-  , RowCons lbl (Maybe a) tail row
+  , RowCons lbl (f a) tail row
   , RowLacks lbl tail
-  ) => Algebra "mapJust" lbl a (Record tail) (Record row) where
-  algebra _ lbl val acc = insert lbl (Just val) acc
+  , Functor f
+  ) => Algebra "map" lbl a (Tuple (f Unit) (Record tail)) (Tuple (f Unit) (Record row)) where
+  algebra _ lbl val (Tuple c acc) = Tuple c $ insert lbl (map (const val) c) acc
 
-instance zeroMapJust :: Zero "mapJust" (Record ()) where
-  algZero _ = {}
+recordMap
+  :: forall f a row list res
+   . RowToList row list
+  => Functor f
+  => Cata "map" list row (Tuple (f Unit) {}) (Tuple (f Unit) res)
+  => f a -> Record row -> res
+recordMap proxy r =
+  let
+    name = SProxy :: SProxy "map"
+    list = RLProxy :: RLProxy list
+    acc = Tuple (map (const unit) proxy) {}
+    Tuple _ res = cata name list acc r
+  in res
 
 recordMapJust
   :: forall row list res
    . RowToList row list
-  => Cata "mapJust" list row res
+  => Cata "map" list row (Tuple (Maybe Unit) {}) (Tuple (Maybe Unit) res)
   => Record row -> res
-recordMapJust r = cata (SProxy :: SProxy "mapJust") (RLProxy :: RLProxy list) r
+recordMapJust = recordMap (Just 1)
