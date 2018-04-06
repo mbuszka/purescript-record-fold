@@ -87,3 +87,45 @@ recordMapJust
   => Cata "map" list row (Tuple (Maybe Unit) {}) (Tuple (Maybe Unit) res)
   => Record row -> res
 recordMapJust = recordMap (Just 1)
+
+instance algebraApply ::
+  ( IsSymbol lbl
+  , RowCons lbl b tail row
+  , RowLacks lbl tail
+  ) => Algebra "apply" lbl (a -> b) (Tuple a (Record tail)) (Tuple a (Record row)) where
+  algebra _ lbl f (Tuple c acc) = Tuple c $ insert lbl (f c) acc
+
+recordApplyTo
+  :: forall a row list res
+   . RowToList row list
+  => Cata "apply" list row (Tuple a {}) (Tuple a res)
+  => a -> Record row -> res
+recordApplyTo v r =
+  let
+    name = SProxy :: SProxy "apply"
+    list = RLProxy :: RLProxy list
+    acc = Tuple v {}
+    Tuple _ res = cata name list acc r
+  in res
+
+instance algebraCollect ::
+  ( IsSymbol lbl
+  , RowCons lbl a tail row
+  , RowLacks lbl tail
+  , Apply f
+  ) => Algebra "collect" lbl (f a) (f (Record tail)) (f (Record row)) where
+  algebra _ lbl a acc = (insert lbl) <$> a <*> acc
+
+recordCollect
+  :: forall f row list res
+   . RowToList row list
+  => Applicative f
+  => Cata "collect" list row (f {}) (f res)
+  => Record row -> f res
+recordCollect r =
+  let
+    name = SProxy :: SProxy "collect"
+    list = RLProxy :: RLProxy list
+    acc = pure {}
+    res = cata name list acc r
+  in res
