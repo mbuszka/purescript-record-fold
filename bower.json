@@ -1,5 +1,5 @@
 {
-  "name": "purescript-record-recursion-schemes",
+  "name": "purescript-record-fold",
   "ignore": [
     "**/.*",
     "node_modules",
