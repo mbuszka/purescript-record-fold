@@ -1,4 +1,20 @@
-module Data.Record.Fold where
+module Data.Record.Fold 
+  ( class Step
+  , class Fold
+  , ApplyS
+  , applyTo
+  , BuilderWrapper
+  , CollectS
+  , collect
+  , fold
+  , LenS
+  , length
+  , MapS
+  , rMap
+  , ShowS
+  , rShow
+  , step
+  ) where
 
 import Prelude
 
