@@ -3,9 +3,8 @@ module Data.Record.Fold where
 import Prelude
 
 import Data.Array (cons)
-import Data.Record (get, insert)
-import Data.Record.Builder (Builder, build)
-import Data.Record.Builder as B
+import Data.Record (get)
+import Data.Record.Builder (Builder, build, insert)
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Tuple (Tuple(..))
 import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind RowList)
@@ -32,102 +31,112 @@ instance foldRowCons
     in step name key (get key record) >>> res
 
 instance foldRowNil
-  :: (Category step) => Fold name Nil r (step a a) where
+  :: 
+  ( Category step
+  ) => Fold name Nil r (step a a) where
   fold name _ _ = id
 
-data LenStep = LenStep
 
-instance lenStep :: Step LenStep lbl a (Int -> Int) where
+data LenS = LenS
+
+instance lenStep :: Step LenS lbl a (Int -> Int) where
   step _ _ _ c = c + 1
 
-recordLen
+length
   :: forall row list
    . RowToList row list
-  => Fold LenStep list row (Int -> Int)
+  => Fold LenS list row (Int -> Int)
   => Record row -> Int
-recordLen rec = fold LenStep (RLProxy :: RLProxy list) rec $ 0
+length rec = fold LenS (RLProxy :: RLProxy list) rec $ 0
+
 
 type Res = Array (Tuple String String)
+data ShowS = ShowS
 
-data ShowStep = ShowStep
-
-instance stepShow ::
+instance showStep ::
   ( Show a
   , IsSymbol lbl
-  ) => Step ShowStep lbl a ((Array (Tuple String String)) -> (Array (Tuple String String))) where
+  ) => Step ShowS lbl a ((Array (Tuple String String)) -> (Array (Tuple String String))) where
   step _ sym val acc = cons (Tuple (reflectSymbol sym) (show val)) acc
 
-recordShow
+rShow
   :: forall row list
    . RowToList row list
-  => Fold ShowStep list row (Res -> Res)
+  => Fold ShowS list row (Res -> Res)
   => Record row -> Res
-recordShow rec = fold ShowStep (RLProxy :: RLProxy list) rec $ []
+rShow rec = fold ShowS (RLProxy :: RLProxy list) rec $ []
 
-data MapStep (f :: Type -> Type) = MapStep (forall a. a -> f a)
 
-instance stepMap ::
+data MapS (f :: Type -> Type) = MapS (forall a. a -> f a)
+
+instance mapStep ::
   ( IsSymbol lbl
   , RowCons lbl (f a) tail row
   , RowLacks lbl tail
-  ) => Step (MapStep f) lbl a (Builder (Record tail) (Record row)) where
-  step (MapStep f) lbl val = B.insert lbl (f val)
+  ) => Step (MapS f) lbl a (Builder (Record tail) (Record row)) where
+  step (MapS f) lbl val = insert lbl (f val)
 
-recordMap
+rMap
   :: forall f row list res
    . RowToList row list
-  => Fold (MapStep f) list row (Builder {} (Record res))
+  => Fold (MapS f) list row (Builder {} (Record res))
   => (forall a. a -> f a) -> Record row -> Record res
-recordMap f r =
+rMap f r =
   let
     list = RLProxy :: RLProxy list
-    builder :: Builder {} (Record res)
-    builder = fold (MapStep f) list r
-    res :: Record res
+    builder = fold (MapS f) list r
     res = build builder {}
   in res
 
--- TODO Change to record builders
 
-data ApplyStep a = ApplyStep a
+data ApplyS a = ApplyS a
 
-instance stepApply ::
+instance applyStep ::
   ( IsSymbol lbl
   , RowCons lbl b tail row
   , RowLacks lbl tail
-  ) => Step (ApplyStep a) lbl (a -> b) ((Record tail) -> (Record row)) where
-  step (ApplyStep c) lbl f acc = insert lbl (f c) acc
+  ) => Step (ApplyS a) lbl (a -> b) (Builder (Record tail) (Record row)) where
+  step (ApplyS c) lbl f = insert lbl (f c)
 
-recordApplyTo
+applyTo
   :: forall a row list res
    . RowToList row list
-  => Fold (ApplyStep a) list row ({} -> res)
-  => a -> Record row -> res
-recordApplyTo v r =
+  => Fold (ApplyS a) list row (Builder {} (Record res))
+  => a -> Record row -> Record res
+applyTo v r =
   let
     list = RLProxy :: RLProxy list
-    res = fold (ApplyStep v) list r {}
+    res = build (fold (ApplyS v) list r) {}
   in res
 
-data CollectStep = CollectStep
 
-instance stepCollect ::
+data CollectS = CollectS
+newtype BuilderWrapper f a b = BW (f (Builder a b))
+
+instance semigroupoidBuilderWrapper :: Apply f => Semigroupoid (BuilderWrapper f) where
+  compose (BW g) (BW f) = BW $ compose <$> g <*> f
+
+instance categoryBuilderWrapper :: Applicative f => Category (BuilderWrapper f) where
+  id = BW $ pure id
+  
+
+instance collectStep ::
   ( IsSymbol lbl
   , RowCons lbl a tail row
   , RowLacks lbl tail
   , Apply f
-  ) => Step CollectStep lbl (f a) (f (Record tail) -> (f (Record row))) where
-  step _ lbl a acc = (insert lbl) <$> a <*> acc
+  ) => Step CollectS lbl (f a) (BuilderWrapper f (Record tail) (Record row)) where
+  step _ lbl a = BW $ insert lbl <$> a
 
-recordCollect
+collect
   :: forall f row list res
    . RowToList row list
   => Applicative f
-  => Fold CollectStep list row (f {} -> f res)
-  => Record row -> f res
-recordCollect r =
+  => Fold CollectS list row (BuilderWrapper f {} (Record res))
+  => Record row -> f (Record res)
+collect r =
   let
     list = RLProxy :: RLProxy list
-    acc = pure {}
-    res = fold CollectStep list r $ acc
+    BW builder = fold CollectS list r
+    res = build <$> builder <*> pure {}
   in res
