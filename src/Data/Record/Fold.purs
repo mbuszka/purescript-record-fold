@@ -3,16 +3,18 @@ module Data.Record.Fold
   , class Fold
   , ApplyS
   , applyTo
-  , BuilderWrapper
+  , AppCat
   , CollectS
   , collect
+  , EqS
   , fold
   , LenS
   , length
   , MapS
+  , rEq
   , rMap
-  , ShowS
   , rShow
+  , ShowS
   , step
   ) where
 
@@ -127,32 +129,54 @@ applyTo v r =
 
 
 data CollectS = CollectS
-newtype BuilderWrapper f a b = BW (f (Builder a b))
 
-instance semigroupoidBuilderWrapper :: Apply f => Semigroupoid (BuilderWrapper f) where
-  compose (BW g) (BW f) = BW $ compose <$> g <*> f
+newtype AppCat app cat a b = AppCat (app (cat a b))
 
-instance categoryBuilderWrapper :: Applicative f => Category (BuilderWrapper f) where
-  id = BW $ pure id
-  
+instance semigroupoidAppCat :: (Semigroupoid cat, Applicative app) => Semigroupoid (AppCat app cat) where
+  compose (AppCat a1) (AppCat a2) = AppCat $ (<<<) <$> a1 <*> a2
+
+instance categoryAppCat :: (Category cat, Applicative app) => Category (AppCat app cat) where
+  id = AppCat (pure id)
 
 instance collectStep ::
   ( IsSymbol lbl
   , RowCons lbl a tail row
   , RowLacks lbl tail
   , Apply f
-  ) => Step CollectS lbl (f a) (BuilderWrapper f (Record tail) (Record row)) where
-  step _ lbl a = BW $ insert lbl <$> a
+  ) => Step CollectS lbl (f a) (AppCat f Builder (Record tail) (Record row)) where
+  step _ lbl a = AppCat $ insert lbl <$> a
 
 collect
   :: forall f row list res
    . RowToList row list
   => Applicative f
-  => Fold CollectS list row (BuilderWrapper f {} (Record res))
+  => Fold CollectS list row (AppCat f Builder {} (Record res))
   => Record row -> f (Record res)
 collect r =
   let
     list = RLProxy :: RLProxy list
-    BW builder = fold CollectS list r
+    AppCat builder = fold CollectS list r
     res = build <$> builder <*> pure {}
   in res
+
+data EqS = EqS
+
+instance eqStep ::
+  ( RowCons lbl a r' r
+  , IsSymbol lbl
+  , Eq a
+  ) => Step EqS lbl a (AppCat ((->) (Record r)) (->) Boolean Boolean) where
+  step _ lbl val = AppCat \other res -> res && get lbl other == val
+
+rEq
+  :: forall row list
+   . RowToList row list
+  => Fold EqS list row (AppCat ((->) (Record row)) (->) Boolean Boolean)
+  => Record row -> Record row -> Boolean
+rEq r1 r2 =
+  let
+    list = RLProxy :: RLProxy list
+    AppCat run = fold EqS list r1
+  in
+    run r2 true
+
