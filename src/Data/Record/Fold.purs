@@ -1,4 +1,4 @@
-module Data.Record.Fold 
+module Data.Record.Fold
   ( class Step
   , class Fold
   , ApplyS
@@ -9,6 +9,7 @@ module Data.Record.Fold
   , EqS
   , fold
   , FoldMapS
+  , labels
   , length
   , MapS
   , rEq
@@ -58,25 +59,32 @@ instance foldRowNil
   fold name _ _ = id
 
 
-newtype FoldMapS m = FoldMapS (forall a. a -> m)
+newtype FoldMapS m = FoldMapS (forall a n. IsSymbol n => SProxy n -> a -> m)
 
-instance foldMapStep :: (Semigroup m) => Step (FoldMapS m) lbl a (m -> m) where
-  step (FoldMapS f) _ a m = f a <> m
+instance foldMapStep :: (IsSymbol lbl, Semigroup m) => Step (FoldMapS m) lbl a (m -> m) where
+  step (FoldMapS f) n a m = f n a <> m
 
 rFoldMap
-   ::  forall m row list
-  . Monoid m
+  :: forall m row list
+   . Monoid m
   => Fold (FoldMapS m) list row (m -> m)
   => RowToList row list
-  => (forall a. a -> m) -> Record row -> m
+  => (forall a n. IsSymbol n => SProxy n -> a -> m) -> Record row -> m
 rFoldMap f r = fold (FoldMapS f) (RLProxy  ::  RLProxy list) r $ mempty
 
 length
   :: forall row list
-  . Fold (FoldMapS (Additive Int)) list row ((Additive Int) -> (Additive Int))
+   . Fold (FoldMapS (Additive Int)) list row (Additive Int -> Additive Int)
   => RowToList row list
   => (Record row) -> Int
-length = unwrap <<< rFoldMap (const $ Additive 1)
+length = unwrap <<< rFoldMap (const <<< const $ Additive 1)
+
+labels
+  :: forall row list
+   . Fold (FoldMapS (Array String)) list row (Array String -> Array String)
+  => RowToList row list
+  => (Record row) -> Array String
+labels = rFoldMap (\s _ -> [reflectSymbol s])
 
 
 type Res = Array (Tuple String String)
