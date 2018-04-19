@@ -1,4 +1,4 @@
-module Data.Record.Fold 
+module Data.Record.Fold
   ( class Step
   , class Fold
   , ApplyS
@@ -8,7 +8,8 @@ module Data.Record.Fold
   , collect
   , EqS
   , fold
-  , LenS
+  , FoldMapS
+  , labels
   , length
   , MapS
   , rEq
@@ -21,6 +22,9 @@ module Data.Record.Fold
 import Prelude
 
 import Data.Array (cons)
+import Data.Monoid (class Monoid, mempty)
+import Data.Monoid.Additive (Additive(..))
+import Data.Newtype (unwrap)
 import Data.Record (get)
 import Data.Record.Builder (Builder, build, insert)
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
@@ -49,23 +53,38 @@ instance foldRowCons
     in step name key (get key record) >>> res
 
 instance foldRowNil
-  :: 
+  ::
   ( Category step
   ) => Fold name Nil r (step a a) where
   fold name _ _ = id
 
 
-data LenS = LenS
+newtype FoldMapS m = FoldMapS (forall a n. IsSymbol n => SProxy n -> a -> m)
 
-instance lenStep :: Step LenS lbl a (Int -> Int) where
-  step _ _ _ c = c + 1
+instance foldMapStep :: (IsSymbol lbl, Semigroup m) => Step (FoldMapS m) lbl a (m -> m) where
+  step (FoldMapS f) n a m = f n a <> m
+
+rFoldMap
+  :: forall m row list
+   . Monoid m
+  => Fold (FoldMapS m) list row (m -> m)
+  => RowToList row list
+  => (forall a n. IsSymbol n => SProxy n -> a -> m) -> Record row -> m
+rFoldMap f r = fold (FoldMapS f) (RLProxy  ::  RLProxy list) r $ mempty
 
 length
   :: forall row list
-   . RowToList row list
-  => Fold LenS list row (Int -> Int)
-  => Record row -> Int
-length rec = fold LenS (RLProxy :: RLProxy list) rec $ 0
+   . Fold (FoldMapS (Additive Int)) list row (Additive Int -> Additive Int)
+  => RowToList row list
+  => (Record row) -> Int
+length = unwrap <<< rFoldMap (const <<< const $ Additive 1)
+
+labels
+  :: forall row list
+   . Fold (FoldMapS (Array String)) list row (Array String -> Array String)
+  => RowToList row list
+  => (Record row) -> Array String
+labels = rFoldMap (\s _ -> [reflectSymbol s])
 
 
 type Res = Array (Tuple String String)
