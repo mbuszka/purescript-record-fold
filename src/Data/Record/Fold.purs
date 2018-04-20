@@ -1,17 +1,19 @@
-module Data.Record.Fold 
-  ( class Step
-  , class Fold
+module Data.Record.Fold
+  ( class Fold
+  , class RFold
+  , class Step
+  , AppCat
   , ApplyS
   , applyTo
-  , AppCat
-  , CollectS
   , collect
+  , CollectS
   , EqS
   , fold
   , LenS
   , length
   , MapS
   , rEq
+  , rFold
   , rMap
   , rShow
   , ShowS
@@ -30,30 +32,39 @@ import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind R
 class Step stepper (lbl :: Symbol) val step | val -> step where
   step :: stepper -> (SProxy lbl) -> val -> step
 
-class Fold stepper (list :: RowList) (row :: # Type) fold | list -> fold where
-  fold :: stepper -> (RLProxy list) -> Record row -> fold
+class RFold stepper (list :: RowList) (row :: # Type) fold | list -> fold where
+  rFold :: stepper -> (RLProxy list) -> Record row -> fold
 
-instance foldRowCons
+instance rFoldRowCons
   ::
   ( Step stepper lbl val (step a b)
   , IsSymbol lbl
   , RowCons lbl val rest row
   , Semigroupoid step
-  , Fold stepper tail row (step b c)
-  ) => Fold stepper (Cons lbl val tail) row (step a c) where
-  fold name _ record =
+  , RFold stepper tail row (step b c)
+  ) => RFold stepper (Cons lbl val tail) row (step a c) where
+  rFold name _ record =
     let
       key = SProxy :: SProxy lbl
       tail = RLProxy :: RLProxy tail
-      res = fold name tail record
+      res = rFold name tail record
     in step name key (get key record) >>> res
 
-instance foldRowNil
-  :: 
+instance rFoldRowNil
+  ::
   ( Category step
-  ) => Fold name Nil r (step a a) where
-  fold name _ _ = id
+  ) => RFold name Nil r (step a a) where
+  rFold name _ _ = id
 
+class Fold stepper a fold | stepper a -> fold where
+  fold :: stepper -> a -> fold
+
+instance foldRecord
+  ::
+  ( RowToList row list
+  , RFold stepper list row fold
+  ) => Fold stepper (Record row) fold where
+  fold stepper = rFold stepper (RLProxy :: RLProxy list)
 
 data LenS = LenS
 
@@ -61,11 +72,10 @@ instance lenStep :: Step LenS lbl a (Int -> Int) where
   step _ _ _ c = c + 1
 
 length
-  :: forall row list
-   . RowToList row list
-  => Fold LenS list row (Int -> Int)
-  => Record row -> Int
-length rec = fold LenS (RLProxy :: RLProxy list) rec $ 0
+  :: forall r
+   . Fold LenS r (Int -> Int)
+  => r -> Int
+length rec = fold LenS rec $ 0
 
 
 type Res = Array (Tuple String String)
@@ -78,11 +88,10 @@ instance showStep ::
   step _ sym val acc = cons (Tuple (reflectSymbol sym) (show val)) acc
 
 rShow
-  :: forall row list
-   . RowToList row list
-  => Fold ShowS list row (Res -> Res)
-  => Record row -> Res
-rShow rec = fold ShowS (RLProxy :: RLProxy list) rec $ []
+  :: forall r
+   . Fold ShowS r (Res -> Res)
+  => r -> Res
+rShow rec = fold ShowS rec $ []
 
 
 data MapS (f :: Type -> Type) = MapS (forall a. a -> f a)
@@ -95,14 +104,12 @@ instance mapStep ::
   step (MapS f) lbl val = insert lbl (f val)
 
 rMap
-  :: forall f row list res
-   . RowToList row list
-  => Fold (MapS f) list row (Builder {} (Record res))
-  => (forall a. a -> f a) -> Record row -> Record res
+  :: forall f r res
+   . Fold (MapS f) r (Builder {} (Record res))
+  => (forall a. a -> f a) -> r -> Record res
 rMap f r =
   let
-    list = RLProxy :: RLProxy list
-    builder = fold (MapS f) list r
+    builder = fold (MapS f) r
     res = build builder {}
   in res
 
@@ -119,12 +126,12 @@ instance applyStep ::
 applyTo
   :: forall a row list res
    . RowToList row list
-  => Fold (ApplyS a) list row (Builder {} (Record res))
+  => RFold (ApplyS a) list row (Builder {} (Record res))
   => a -> Record row -> Record res
 applyTo v r =
   let
     list = RLProxy :: RLProxy list
-    res = build (fold (ApplyS v) list r) {}
+    res = build (rFold (ApplyS v) list r) {}
   in res
 
 
@@ -147,15 +154,13 @@ instance collectStep ::
   step _ lbl a = AppCat $ insert lbl <$> a
 
 collect
-  :: forall f row list res
-   . RowToList row list
-  => Applicative f
-  => Fold CollectS list row (AppCat f Builder {} (Record res))
-  => Record row -> f (Record res)
+  :: forall f r res
+   . Applicative f
+  => Fold CollectS r (AppCat f Builder {} (Record res))
+  => r -> f (Record res)
 collect r =
   let
-    list = RLProxy :: RLProxy list
-    AppCat builder = fold CollectS list r
+    AppCat builder = fold CollectS r
     res = build <$> builder <*> pure {}
   in res
 
@@ -169,14 +174,12 @@ instance eqStep ::
   step _ lbl val = AppCat \other res -> res && get lbl other == val
 
 rEq
-  :: forall row list
-   . RowToList row list
-  => Fold EqS list row (AppCat ((->) (Record row)) (->) Boolean Boolean)
-  => Record row -> Record row -> Boolean
+  :: forall r
+   . Fold EqS r (AppCat ((->) r) (->) Boolean Boolean)
+  => r -> r -> Boolean
 rEq r1 r2 =
   let
-    list = RLProxy :: RLProxy list
-    AppCat run = fold EqS list r1
+    AppCat run = fold EqS r1
   in
     run r2 true
 
