@@ -3,11 +3,11 @@ module Test.Main where
 import Prelude
 
 import Data.Record.Fold (applyTo, collect, length, rEq, rMap, rShow)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Console (CONSOLE, log)
+import Effect (Effect)
+import Effect.Console (log)
 import Data.Maybe (Maybe(..))
 
-main :: forall e. Eff (console :: CONSOLE | e) Unit
+main :: Effect Unit
 main = do
   log $ show $ length { a: 123, b: "hello"}
   log $ show $ rShow { a: 123, b: "hello"}
