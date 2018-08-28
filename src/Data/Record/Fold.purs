@@ -23,11 +23,12 @@ module Data.Record.Fold
 import Prelude
 
 import Data.Array (cons)
-import Data.Record (get)
-import Data.Record.Builder (Builder, build, insert)
+import Record (get)
+import Record.Builder (Builder, build, insert)
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Tuple (Tuple(..))
-import Type.Row (class RowLacks, class RowToList, Cons, Nil, RLProxy(..), kind RowList)
+import Prim.Row (class Lacks, class Cons)
+import Type.Row (class RowToList, Cons, Nil, RLProxy(..), kind RowList)
 
 class Step stepper (lbl :: Symbol) val step | val -> step where
   step :: stepper -> (SProxy lbl) -> val -> step
@@ -39,7 +40,7 @@ instance rFoldRowCons
   ::
   ( Step stepper lbl val (step a b)
   , IsSymbol lbl
-  , RowCons lbl val rest row
+  , Cons lbl val rest row
   , Semigroupoid step
   , RFold stepper tail row (step b c)
   ) => RFold stepper (Cons lbl val tail) row (step a c) where
@@ -54,7 +55,7 @@ instance rFoldRowNil
   ::
   ( Category step
   ) => RFold name Nil r (step a a) where
-  rFold name _ _ = id
+  rFold name _ _ = identity
 
 class Fold stepper a fold | stepper a -> fold where
   fold :: stepper -> a -> fold
@@ -98,8 +99,8 @@ data MapS (f :: Type -> Type) = MapS (forall a. a -> f a)
 
 instance mapStep ::
   ( IsSymbol lbl
-  , RowCons lbl (f a) tail row
-  , RowLacks lbl tail
+  , Cons lbl (f a) tail row
+  , Lacks lbl tail
   ) => Step (MapS f) lbl a (Builder (Record tail) (Record row)) where
   step (MapS f) lbl val = insert lbl (f val)
 
@@ -118,8 +119,8 @@ data ApplyS a = ApplyS a
 
 instance applyStep ::
   ( IsSymbol lbl
-  , RowCons lbl b tail row
-  , RowLacks lbl tail
+  , Cons lbl b tail row
+  , Lacks lbl tail
   ) => Step (ApplyS a) lbl (a -> b) (Builder (Record tail) (Record row)) where
   step (ApplyS c) lbl f = insert lbl (f c)
 
@@ -143,12 +144,12 @@ instance semigroupoidAppCat :: (Semigroupoid cat, Applicative app) => Semigroupo
   compose (AppCat a1) (AppCat a2) = AppCat $ (<<<) <$> a1 <*> a2
 
 instance categoryAppCat :: (Category cat, Applicative app) => Category (AppCat app cat) where
-  id = AppCat (pure id)
+  identity = AppCat (pure identity)
 
 instance collectStep ::
   ( IsSymbol lbl
-  , RowCons lbl a tail row
-  , RowLacks lbl tail
+  , Cons lbl a tail row
+  , Lacks lbl tail
   , Apply f
   ) => Step CollectS lbl (f a) (AppCat f Builder (Record tail) (Record row)) where
   step _ lbl a = AppCat $ insert lbl <$> a
@@ -167,7 +168,7 @@ collect r =
 data EqS = EqS
 
 instance eqStep ::
-  ( RowCons lbl a r' r
+  ( Cons lbl a r' r
   , IsSymbol lbl
   , Eq a
   ) => Step EqS lbl a (AppCat ((->) (Record r)) (->) Boolean Boolean) where
